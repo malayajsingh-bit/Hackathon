@@ -1,0 +1,43 @@
+name: "VP Product"
+role: "Vice President of Product"
+
+content_preferences:
+  depth: "strategic-with-data"
+  max_slides: 15
+  wants_executive_summary: true
+  wants_appendix: true
+  decision_focus: true
+
+visual_preferences:
+  font_size_minimum: 20
+  max_colors: 4
+  prefers_charts_over_tables: true
+  chart_type: "funnel_and_trend"
+  max_bullet_points_per_slide: 5
+  max_chars_per_bullet: 70
+
+tone:
+  language: "product-strategy"
+  metrics_format: "user_metrics_with_trends"
+  always_include:
+    - "user_impact"
+    - "adoption_metrics"
+    - "ab_test_results"
+    - "user_journey"
+    - "competitive_landscape"
+  never_include:
+    - "low_level_code"
+    - "infrastructure_details"
+
+structure:
+  - "Title Slide"
+  - "Executive Summary"
+  - "User Problem (with data)"
+  - "Current User Journey"
+  - "Proposed Solution"
+  - "Expected User Impact"
+  - "Success Metrics & KPIs"
+  - "A/B Test Plan"
+  - "Roadmap & Phases"
+  - "Dependencies & Risks"
+  - "Ask / Decision Needed"

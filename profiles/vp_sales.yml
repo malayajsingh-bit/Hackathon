@@ -1,0 +1,41 @@
+name: "VP Sales"
+role: "Vice President of Sales"
+
+content_preferences:
+  depth: "actionable-insights"
+  max_slides: 12
+  wants_executive_summary: true
+  wants_appendix: false
+  decision_focus: true
+
+visual_preferences:
+  font_size_minimum: 22
+  max_colors: 4
+  prefers_charts_over_tables: true
+  chart_type: "comparison_and_trend"
+  max_bullet_points_per_slide: 5
+  max_chars_per_bullet: 70
+
+tone:
+  language: "sales-impact"
+  metrics_format: "percentage_change_with_targets"
+  always_include:
+    - "conversion_metrics"
+    - "lead_quality"
+    - "revenue_impact"
+    - "seller_engagement"
+    - "competitive_advantage"
+  never_include:
+    - "code_snippets"
+    - "database_schemas"
+    - "api_specs"
+
+structure:
+  - "Title Slide"
+  - "Executive Summary (impact on sales)"
+  - "Current Performance vs Target"
+  - "Problem / Opportunity"
+  - "Proposed Solution (sales lens)"
+  - "Expected Impact on Key Metrics"
+  - "Rollout Plan"
+  - "Ask / Resources Needed"

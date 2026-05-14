@@ -1,0 +1,42 @@
+name: "CTO"
+role: "Chief Technology Officer"
+
+content_preferences:
+  depth: "detailed-technical"
+  max_slides: 25
+  wants_executive_summary: false
+  wants_appendix: false
+  decision_focus: false
+
+visual_preferences:
+  font_size_minimum: 18
+  max_colors: 5
+  prefers_charts_over_tables: false
+  chart_type: "detailed_with_data_labels"
+  max_bullet_points_per_slide: 6
+  max_chars_per_bullet: 80
+
+tone:
+  language: "technical"
+  metrics_format: "absolute_with_benchmarks"
+  always_include:
+    - "system_design"
+    - "tech_stack"
+    - "scalability"
+    - "performance_benchmarks"
+    - "architecture_diagram"
+    - "migration_plan"
+  never_include:
+    - "revenue_projections"
+    - "marketing_language"
+
+structure:
+  - "Title Slide"
+  - "Problem (technical context)"
+  - "Current Architecture"
+  - "Proposed Architecture"
+  - "Technical Deep Dive (multiple slides)"
+  - "Performance Benchmarks"
+  - "Migration Plan"
+  - "Risks & Mitigations"
+  - "Timeline"

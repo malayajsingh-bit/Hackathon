@@ -1,0 +1,41 @@
+name: "CEO"
+role: "Chief Executive Officer"
+
+content_preferences:
+  depth: "executive-summary"
+  max_slides: 10
+  wants_executive_summary: true
+  wants_appendix: true
+  decision_focus: true
+
+visual_preferences:
+  font_size_minimum: 24
+  max_colors: 3
+  prefers_charts_over_tables: true
+  chart_type: "simple_bar_or_line"
+  max_bullet_points_per_slide: 4
+  max_chars_per_bullet: 60
+
+tone:
+  language: "business-impact"
+  metrics_format: "percentage_and_absolute"
+  always_include:
+    - "revenue_impact"
+    - "timeline"
+    - "risk"
+    - "executive_summary"
+  never_include:
+    - "code_snippets"
+    - "technical_architecture"
+    - "implementation_details"
+    - "api_specs"
+
+structure:
+  - "Title Slide"
+  - "Executive Summary (1 slide, 3 key metrics)"
+  - "Problem Statement"
+  - "Proposed Solution (max 2 slides)"
+  - "Business Impact (revenue, efficiency, growth)"
+  - "Timeline & Milestones"
+  - "Ask / Decision Needed"
+  - "Appendix (detailed backup)"
