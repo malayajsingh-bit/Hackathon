@@ -4,8 +4,6 @@ import yaml
 import streamlit as st
 from datetime import datetime
 
-import here
-
 from utils.claude_client import ClaudeClient
 from core.content_extractor import ContentExtractor
 from core.ppt_agent import PPTAgent
