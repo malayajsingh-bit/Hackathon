@@ -20,18 +20,19 @@ class ClaudeClient:
         return response.choices[0].message.content
 
     def generate_json(self, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> dict:
-        full_system = system_prompt + "\n\nIMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences."
+        full_system = system_prompt + "\n\nIMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences. No trailing commas."
         text = self.generate(full_system, user_prompt, max_tokens)
         text = text.strip()
         # Strip markdown code fences if present
         if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
+            text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
+            text = re.sub(r'```\s*$', '', text)
             text = text.strip()
-        # Try to extract JSON if wrapped in other text
+        # Extract JSON block if wrapped in other text
         if not text.startswith(("{", "[")):
             json_match = re.search(r'(\{[\s\S]*\}|\[[\s\S]*\])', text)
             if json_match:
                 text = json_match.group(1)
+        # Remove trailing commas before ] or } (LLMs often produce these)
+        text = re.sub(r',(\s*[}\]])', r'\1', text)
         return json.loads(text)

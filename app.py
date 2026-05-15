@@ -6,8 +6,7 @@ from datetime import datetime
 
 from utils.claude_client import ClaudeClient
 from core.content_extractor import ContentExtractor
-from core.slide_planner import SlidePlanner
-from core.slide_generator import SlideGenerator
+from core.ppt_agent import PPTAgent
 from core.chart_generator import ChartGenerator
 from core.diagram_generator import DiagramGenerator
 from core.ppt_renderer import PPTRenderer
@@ -38,8 +37,7 @@ def init_clients(api_key: str, base_url: str, model: str):
     return {
         "claude": claude,
         "extractor": ContentExtractor(claude),
-        "planner": SlidePlanner(claude),
-        "generator": SlideGenerator(claude),
+        "agent": PPTAgent(claude),
         "chart_gen": ChartGenerator(TEMP_DIR),
         "diagram_gen": DiagramGenerator(claude, TEMP_DIR),
     }
@@ -116,9 +114,10 @@ with st.sidebar:
                                 value="https://imllm.intermesh.net/v1",
                                 help="Indiamart LLM Gateway (OpenAI-compatible)")
     api_key = st.text_input("API Key", type="password",
+                            value="sk-fOjolFOnhGoJidHjUlFIHA",
                             placeholder="Your LLM Gateway access key (sk-xxx)")
     model_name = st.text_input("Model Name",
-                               value="openrouter/qwen/qwen3-32b",
+                               value="google/gemini-3-flash-preview",
                                help="Model identifier — use the model you have access to")
 
     if api_key and gateway_url:
@@ -315,32 +314,29 @@ if st.button("🚀 Analyze Content & Create Plan", type="primary", use_container
         content = None
         uploaded_image_paths = []
 
-        # P0: Paste Text
+        # Always capture old_ppt as template first (independent of content source)
+        if old_ppt:
+            old_ppt_path = save_uploaded_file(old_ppt)
+            st.session_state.old_ppt_path = old_ppt_path
+        else:
+            st.session_state.pop("old_ppt_path", None)
+
+        # Determine content source — old_ppt is only used for content
+        # if no other source is provided alongside it
         if pasted_text:
             content = clients["extractor"].extract_from_text(pasted_text, paste_context)
 
-        # P0: Excel / CSV
         elif data_files:
             file_paths = [save_uploaded_file(f) for f in data_files]
             content = clients["extractor"].extract_from_files(file_paths, data_context)
 
-        # P0: Topic
         elif topic:
             content = clients["extractor"].extract_from_topic(topic, topic_context)
 
-        # P0: Update Existing PPT
-        elif old_ppt:
-            old_ppt_path = save_uploaded_file(old_ppt)
-            new_paths = [save_uploaded_file(f) for f in new_data_for_ppt] if new_data_for_ppt else []
-            content = clients["extractor"].extract_from_previous_ppt(
-                old_ppt_path, new_paths, new_text_for_ppt, ppt_update_context)
-
-        # P1: Documents
         elif doc_files:
             file_paths = [save_uploaded_file(f) for f in doc_files]
             content = clients["extractor"].extract_from_files(file_paths, doc_context)
 
-        # P1: Screenshots / Images
         elif image_files:
             uploaded_image_paths = [save_uploaded_file(f) for f in image_files]
             img_description = image_context or "Product screenshots and visuals for the presentation"
@@ -349,23 +345,25 @@ if st.button("🚀 Analyze Content & Create Plan", type="primary", use_container
                 f"Images uploaded: {file_info}\n\nContext: {img_description}",
                 "Create a presentation that incorporates these images into relevant slides.")
 
-        # P1: URL / Webpage
         elif url_input:
             content = clients["extractor"].extract_from_url(url_input, url_context)
 
-        # P2: OpenProject
         elif openproject_url and openproject_key:
             content = clients["extractor"].extract_from_openproject(
                 openproject_url, openproject_key,
                 openproject_project or None, openproject_context)
 
-        # P2: GitHub Repo
         elif github_url:
             content = clients["extractor"].extract_from_github(github_url, github_context)
 
-        # P3: Google Sheets
         elif gsheet_url:
             content = clients["extractor"].extract_from_google_sheet(gsheet_url, gsheet_context)
+
+        elif old_ppt:
+            # No other content source — extract content from the PPT itself
+            new_paths = [save_uploaded_file(f) for f in new_data_for_ppt] if new_data_for_ppt else []
+            content = clients["extractor"].extract_from_previous_ppt(
+                st.session_state.old_ppt_path, new_paths, new_text_for_ppt, ppt_update_context)
 
         else:
             st.error("Please provide content in one of the input tabs above.")
@@ -376,8 +374,18 @@ if st.button("🚀 Analyze Content & Create Plan", type="primary", use_container
 
         st.session_state.content = content
 
-    with st.spinner("📋 Planning slides for " + p["name"] + "..."):
-        plan = clients["planner"].plan(content, profiles[leader_key])
+    with st.spinner("📋 Designing narrative strategy for " + p["name"] + "..."):
+        # Collect every additional context/instruction the user typed across all tabs
+        user_instructions = "\n".join(filter(None, [
+            paste_context, data_context, topic_context,
+            ppt_update_context, new_text_for_ppt,
+            doc_context, image_context, url_context,
+            openproject_context, github_context, gsheet_context,
+        ]))
+        plan = clients["agent"].plan(
+            content, profiles[leader_key],
+            user_instructions=user_instructions,
+        )
         st.session_state.plan = plan
         st.session_state.leader_key = leader_key
 
@@ -438,9 +446,9 @@ if "plan" in st.session_state:
         progress = st.progress(0, text="Starting generation...")
         total_steps = len(plan) + 2
 
-        # Generate slide content
-        progress.progress(1 / total_steps, text="Generating slide content with AI...")
-        slide_contents = clients["generator"].generate_all(plan, content, profile)
+        # Generate all slide content in one coherent call
+        progress.progress(1 / total_steps, text="Generating full deck content with AI...")
+        slide_contents = clients["agent"].generate_all(plan, content, profile)
 
         # Generate charts and diagrams
         chart_paths = {}
@@ -469,7 +477,6 @@ if "plan" in st.session_state:
                 except Exception as e:
                     st.warning(f"Diagram generation failed for slide {plan_item['slide_number']}: {e}")
 
-        # Render PPT
         progress.progress((total_steps - 1) / total_steps, text="Rendering PPT...")
         renderer = PPTRenderer(profile)
 
