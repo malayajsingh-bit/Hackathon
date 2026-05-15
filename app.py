@@ -6,8 +6,7 @@ from datetime import datetime
 
 from utils.claude_client import ClaudeClient
 from core.content_extractor import ContentExtractor
-from core.slide_planner import SlidePlanner
-from core.slide_generator import SlideGenerator
+from core.ppt_agent import PPTAgent
 from core.chart_generator import ChartGenerator
 from core.diagram_generator import DiagramGenerator
 from core.ppt_renderer import PPTRenderer
@@ -38,8 +37,7 @@ def init_clients(api_key: str, base_url: str, model: str):
     return {
         "claude": claude,
         "extractor": ContentExtractor(claude),
-        "planner": SlidePlanner(claude),
-        "generator": SlideGenerator(claude),
+        "agent": PPTAgent(claude),
         "chart_gen": ChartGenerator(TEMP_DIR),
         "diagram_gen": DiagramGenerator(claude, TEMP_DIR),
     }
@@ -116,9 +114,10 @@ with st.sidebar:
                                 value="https://imllm.intermesh.net/v1",
                                 help="Indiamart LLM Gateway (OpenAI-compatible)")
     api_key = st.text_input("API Key", type="password",
+                            value="sk-fOjolFOnhGoJidHjUlFIHA",
                             placeholder="Your LLM Gateway access key (sk-xxx)")
     model_name = st.text_input("Model Name",
-                               value="openrouter/qwen/qwen3-32b",
+                               value="google/gemini-3-flash-preview",
                                help="Model identifier — use the model you have access to")
 
     if api_key and gateway_url:
@@ -280,6 +279,26 @@ with tab_p3_1:
                                   key="gsheet_context", height=80)
     st.caption("Sheet must be shared with 'Anyone with the link'. Reads data as CSV.")
 
+# ─── PROOF OF WORK SCREENSHOTS ───
+st.markdown("---")
+st.markdown("**📸 Proof of Work / Demo Screenshots** *(Optional)*")
+st.caption("Upload screenshots of your demo, feature, or results — each will become a dedicated slide at the end of the PPT.")
+
+proof_files = st.file_uploader(
+    "Upload screenshots",
+    type=["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+    accept_multiple_files=True,
+    key="proof_upload",
+    help="Each screenshot gets its own slide. Aspect ratio is preserved automatically."
+)
+proof_caption = st.text_input(
+    "Caption / label for these screenshots (optional)",
+    placeholder="e.g., Live demo on staging — May 2026",
+    key="proof_caption_input"
+)
+if proof_files:
+    st.info(f"{len(proof_files)} screenshot(s) uploaded — will be appended as proof slides after the main deck.")
+
 # ─── STEP 2: SELECT LEADER ───
 st.markdown('<p class="step-header">Step 2: Select Audience</p>', unsafe_allow_html=True)
 
@@ -315,32 +334,29 @@ if st.button("🚀 Analyze Content & Create Plan", type="primary", use_container
         content = None
         uploaded_image_paths = []
 
-        # P0: Paste Text
+        # Always capture old_ppt as template first (independent of content source)
+        if old_ppt:
+            old_ppt_path = save_uploaded_file(old_ppt)
+            st.session_state.old_ppt_path = old_ppt_path
+        else:
+            st.session_state.pop("old_ppt_path", None)
+
+        # Determine content source — old_ppt is only used for content
+        # if no other source is provided alongside it
         if pasted_text:
             content = clients["extractor"].extract_from_text(pasted_text, paste_context)
 
-        # P0: Excel / CSV
         elif data_files:
             file_paths = [save_uploaded_file(f) for f in data_files]
             content = clients["extractor"].extract_from_files(file_paths, data_context)
 
-        # P0: Topic
         elif topic:
             content = clients["extractor"].extract_from_topic(topic, topic_context)
 
-        # P0: Update Existing PPT
-        elif old_ppt:
-            old_ppt_path = save_uploaded_file(old_ppt)
-            new_paths = [save_uploaded_file(f) for f in new_data_for_ppt] if new_data_for_ppt else []
-            content = clients["extractor"].extract_from_previous_ppt(
-                old_ppt_path, new_paths, new_text_for_ppt, ppt_update_context)
-
-        # P1: Documents
         elif doc_files:
             file_paths = [save_uploaded_file(f) for f in doc_files]
             content = clients["extractor"].extract_from_files(file_paths, doc_context)
 
-        # P1: Screenshots / Images
         elif image_files:
             uploaded_image_paths = [save_uploaded_file(f) for f in image_files]
             img_description = image_context or "Product screenshots and visuals for the presentation"
@@ -349,23 +365,25 @@ if st.button("🚀 Analyze Content & Create Plan", type="primary", use_container
                 f"Images uploaded: {file_info}\n\nContext: {img_description}",
                 "Create a presentation that incorporates these images into relevant slides.")
 
-        # P1: URL / Webpage
         elif url_input:
             content = clients["extractor"].extract_from_url(url_input, url_context)
 
-        # P2: OpenProject
         elif openproject_url and openproject_key:
             content = clients["extractor"].extract_from_openproject(
                 openproject_url, openproject_key,
                 openproject_project or None, openproject_context)
 
-        # P2: GitHub Repo
         elif github_url:
             content = clients["extractor"].extract_from_github(github_url, github_context)
 
-        # P3: Google Sheets
         elif gsheet_url:
             content = clients["extractor"].extract_from_google_sheet(gsheet_url, gsheet_context)
+
+        elif old_ppt:
+            # No other content source — extract content from the PPT itself
+            new_paths = [save_uploaded_file(f) for f in new_data_for_ppt] if new_data_for_ppt else []
+            content = clients["extractor"].extract_from_previous_ppt(
+                st.session_state.old_ppt_path, new_paths, new_text_for_ppt, ppt_update_context)
 
         else:
             st.error("Please provide content in one of the input tabs above.")
@@ -376,10 +394,28 @@ if st.button("🚀 Analyze Content & Create Plan", type="primary", use_container
 
         st.session_state.content = content
 
-    with st.spinner("📋 Planning slides for " + p["name"] + "..."):
-        plan = clients["planner"].plan(content, profiles[leader_key])
+    with st.spinner("📋 Designing narrative strategy for " + p["name"] + "..."):
+        # Collect every additional context/instruction the user typed across all tabs
+        user_instructions = "\n".join(filter(None, [
+            paste_context, data_context, topic_context,
+            ppt_update_context, new_text_for_ppt,
+            doc_context, image_context, url_context,
+            openproject_context, github_context, gsheet_context,
+        ]))
+        plan = clients["agent"].plan(
+            content, profiles[leader_key],
+            user_instructions=user_instructions,
+        )
         st.session_state.plan = plan
         st.session_state.leader_key = leader_key
+
+        # Save proof screenshot paths now so they survive across reruns
+        if proof_files:
+            st.session_state.proof_paths   = [save_uploaded_file(f) for f in proof_files]
+            st.session_state.proof_caption = proof_caption
+        else:
+            st.session_state.proof_paths   = []
+            st.session_state.proof_caption = ""
 
     st.success(f"✅ Plan created: {len(plan)} slides for {p['name']}")
 
@@ -438,9 +474,9 @@ if "plan" in st.session_state:
         progress = st.progress(0, text="Starting generation...")
         total_steps = len(plan) + 2
 
-        # Generate slide content
-        progress.progress(1 / total_steps, text="Generating slide content with AI...")
-        slide_contents = clients["generator"].generate_all(plan, content, profile)
+        # Generate all slide content in one coherent call
+        progress.progress(1 / total_steps, text="Generating full deck content with AI...")
+        slide_contents = clients["agent"].generate_all(plan, content, profile)
 
         # Generate charts and diagrams
         chart_paths = {}
@@ -469,7 +505,6 @@ if "plan" in st.session_state:
                 except Exception as e:
                     st.warning(f"Diagram generation failed for slide {plan_item['slide_number']}: {e}")
 
-        # Render PPT
         progress.progress((total_steps - 1) / total_steps, text="Rendering PPT...")
         renderer = PPTRenderer(profile)
 
@@ -487,30 +522,54 @@ if "plan" in st.session_state:
                     chart_path=chart_paths.get(sn),
                     diagram_path=diagram_paths.get(sn))
 
+        # Append proof/demo screenshot slides if any were uploaded
+        proof_paths   = st.session_state.get("proof_paths", [])
+        proof_caption = st.session_state.get("proof_caption", "")
+        if proof_paths:
+            progress.progress((total_steps - 1) / total_steps,
+                              text=f"Adding {len(proof_paths)} proof screenshot(s)...")
+            for idx, img_path in enumerate(proof_paths, start=1):
+                renderer.add_proof_slide(
+                    image_path=img_path,
+                    caption=proof_caption,
+                    index=idx,
+                    total=len(proof_paths))
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         leader_name = profile["name"].replace(" ", "_")
         output_filename = f"presentation_{leader_name}_{timestamp}.pptx"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
         renderer.save(output_path)
 
+        # Persist path so the Preview button survives re-runs
+        st.session_state.output_path     = output_path
+        st.session_state.output_filename = output_filename
+
         progress.progress(1.0, text="Done!")
 
-        st.success(f"🎉 Presentation generated: {len(plan)} slides for {profile['name']}")
+        total_slides = len(plan) + len(proof_paths)
+        st.success(f"Presentation generated: {total_slides} slides for {profile['name']}"
+                   + (f" (incl. {len(proof_paths)} proof slide(s))" if proof_paths else ""))
 
-        with open(output_path, "rb") as f:
-            st.download_button(
-                label="⬇️ Download Presentation",
-                data=f,
-                file_name=output_filename,
-                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                type="primary",
-                use_container_width=True)
+        col_dl, col_pv = st.columns(2)
+        with col_dl:
+            with open(output_path, "rb") as f:
+                st.download_button(
+                    label="⬇️ Download Presentation",
+                    data=f,
+                    file_name=output_filename,
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    type="primary",
+                    use_container_width=True)
+        with col_pv:
+            if st.button("👁️ Preview in Browser", type="secondary", use_container_width=True):
+                st.session_state.show_preview = True
 
         st.markdown("---")
-        st.markdown("### 🔄 Generate for Another Leader")
+        st.markdown("### Generate for Another Leader")
         st.markdown("Change the leader in Step 2 and click **Generate PPT** again — same content, different style!")
 
-        with st.expander("📄 View Generated Slide Content", expanded=False):
+        with st.expander("View Generated Slide Content", expanded=False):
             for sc in slide_contents:
                 st.markdown(f"**Slide {sc.get('slide_number', '?')}: {sc.get('title', '')}**")
                 if sc.get("bullets"):
@@ -521,3 +580,77 @@ if "plan" in st.session_state:
                 if sc.get("speaker_notes"):
                     st.caption(f"Speaker notes: {sc['speaker_notes']}")
                 st.markdown("---")
+
+# ─── IN-BROWSER SLIDE PREVIEW ────────────────────────────────────────────────
+if st.session_state.get("show_preview") and st.session_state.get("output_path"):
+    out_path = st.session_state.output_path
+    out_name = st.session_state.get("output_filename", "presentation.pptx")
+
+    st.markdown("---")
+    st.markdown("## Slide Preview")
+
+    col_hdr, col_close = st.columns([5, 1])
+    with col_hdr:
+        st.caption(f"Previewing: **{out_name}**")
+    with col_close:
+        if st.button("✕ Close", use_container_width=True):
+            st.session_state.show_preview = False
+            st.rerun()
+
+    if not os.path.exists(out_path):
+        st.warning("Presentation file not found. Please regenerate.")
+    else:
+        with st.spinner("Rendering slide previews..."):
+            from utils.preview_generator import generate_previews
+            preview_dir = os.path.join(
+                TEMP_DIR,
+                "preview_" + os.path.splitext(os.path.basename(out_path))[0])
+            preview_paths = generate_previews(out_path, preview_dir)
+
+        if not preview_paths:
+            st.warning("Could not render previews. Please download and open in PowerPoint.")
+        else:
+            total_p = len(preview_paths)
+            st.caption(f"{total_p} slide(s) — 2 per row")
+
+            # Navigation: show all or paginate
+            PER_PAGE = 10
+            page_key = "preview_page"
+            if page_key not in st.session_state:
+                st.session_state[page_key] = 0
+
+            page      = st.session_state[page_key]
+            start     = page * PER_PAGE
+            end       = min(start + PER_PAGE, total_p)
+            page_imgs = preview_paths[start:end]
+
+            for row_start in range(0, len(page_imgs), 2):
+                cols = st.columns(2)
+                for ci, col in enumerate(cols):
+                    idx = row_start + ci
+                    if idx < len(page_imgs):
+                        with col:
+                            st.image(
+                                page_imgs[idx],
+                                caption=f"Slide {start + idx + 1}",
+                                use_container_width=True)
+
+            # Pagination controls
+            if total_p > PER_PAGE:
+                max_page = (total_p - 1) // PER_PAGE
+                p_col1, p_col2, p_col3 = st.columns([1, 2, 1])
+                with p_col1:
+                    if page > 0:
+                        if st.button("← Prev", use_container_width=True):
+                            st.session_state[page_key] -= 1
+                            st.rerun()
+                with p_col2:
+                    st.markdown(
+                        f"<div style='text-align:center;padding-top:6px'>"
+                        f"Page {page + 1} / {max_page + 1}</div>",
+                        unsafe_allow_html=True)
+                with p_col3:
+                    if page < max_page:
+                        if st.button("Next →", use_container_width=True):
+                            st.session_state[page_key] += 1
+                            st.rerun()
