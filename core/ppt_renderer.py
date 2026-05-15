@@ -2,7 +2,7 @@ import os
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
 from utils.config import BRAND, FONT_FAMILY, FOOTER_TEXT, SLIDE_DIMENSIONS
 
@@ -98,12 +98,39 @@ class PPTRenderer:
         for ph in list(slide.placeholders):
             ph._element.getparent().remove(ph._element)
 
-        # ONE title textbox — word_wrap on, wraps to 2nd line if long, never splits
-        self._add_textbox(slide, title,
-                          left=Inches(_TS_LEFT), top=Inches(_TS_Y_TITLE),
-                          width=Inches(_TS_WIDTH), height=Inches(1.6),
-                          font_size=Pt(_TS_FONT), color=BRAND["dark"],
-                          bold=True, alignment=PP_ALIGN.LEFT)
+        # Estimate how many lines the title will wrap to inside the textbox.
+        # At 32pt Calibri on a 5.93" wide box ≈ 22 chars per line (conservative).
+        # Use that to pick Y-start and font so text always stays above the grey line.
+        #   1-2 lines → Y=1.57, font=32
+        #   3 lines   → Y=1.29, font=30
+        #   4+ lines  → Y=0.71, font=30
+        CHARS_PER_LINE = 30
+        est_lines = max(1, (len(title) + CHARS_PER_LINE - 1) // CHARS_PER_LINE)
+
+        if est_lines <= 2:
+            ts_y, ts_font = 1.57, 32
+        elif est_lines == 3:
+            ts_y, ts_font = 1.29, 30
+        else:
+            ts_y, ts_font = 0.71, 30
+
+        # Height fills from ts_y to just above the grey line (grey line ≈ content_top - 0.28)
+        ts_h = _TS_Y_CONTENT - ts_y - 0.28
+
+        # ONE textbox — word_wrap=True, no auto_size so PowerPoint never splits it
+        txBox = slide.shapes.add_textbox(
+            Inches(_TS_LEFT), Inches(ts_y),
+            Inches(_TS_WIDTH), Inches(ts_h))
+        tf = txBox.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        run = p.add_run()
+        run.text = title
+        run.font.size = Pt(ts_font)
+        run.font.bold = True
+        run.font.name = FONT_FAMILY
+        run.font.color.rgb = BRAND["dark"]
+        p.alignment = PP_ALIGN.LEFT
 
         # ONE subtitle/date textbox below the grey line
         sub_text = f"{subtitle}   {date}" if subtitle else date
@@ -151,7 +178,8 @@ class PPTRenderer:
         if metrics:
             n = len(metrics)
             card_top = _CONTENT_TOP + (bullet_h + 0.15 if non_metrics else 0.0)
-            box_w = min(3.4, _SLIDE_W / n)
+            MIN_GAP = 0.25  # guaranteed minimum gap between boxes
+            box_w = min(3.4, (_SLIDE_W - (n - 1) * MIN_GAP) / n)
             if n == 1:
                 self._add_metric_card(slide, metrics[0],
                                       Inches(_LEFT_MARGIN), Inches(card_top),
@@ -340,9 +368,12 @@ class PPTRenderer:
 
         tf = shape.text_frame
         tf.word_wrap = True
-        tf.margin_top = Pt(10)
-        tf.margin_left = Pt(8)
-        tf.margin_right = Pt(8)
+        # Shrink font automatically if text overflows the box — never clip/overflow
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        tf.margin_top    = Pt(12)
+        tf.margin_bottom = Pt(12)
+        tf.margin_left   = Pt(14)
+        tf.margin_right  = Pt(14)
 
         p = tf.paragraphs[0]
         p.text = metric_text
@@ -417,6 +448,46 @@ class PPTRenderer:
     def _add_speaker_notes(self, slide, notes: str):
         if notes:
             slide.notes_slide.notes_text_frame.text = notes
+
+    def add_proof_slide(self, image_path: str, caption: str = "", index: int = 1, total: int = 1):
+        """Embed a screenshot as a dedicated proof/demo slide."""
+        label = f"Demo Screenshot {index}/{total}" if total > 1 else "Demo / Proof of Work"
+        slide = self._create_base_slide(label)
+
+        if not os.path.exists(image_path):
+            return
+
+        # Maintain aspect ratio — fit inside the content area with a small margin
+        max_w = _SLIDE_W - 0.4
+        max_h = _CONTENT_H - (0.6 if caption else 0.2)
+
+        try:
+            from PIL import Image as _PIL
+            with _PIL.open(image_path) as im:
+                img_w, img_h = im.size
+            aspect = img_w / img_h
+            if max_w / aspect <= max_h:
+                w, h = max_w, max_w / aspect
+            else:
+                w, h = max_h * aspect, max_h
+        except Exception:
+            w, h = max_w, max_h
+
+        # Centre horizontally in the usable width
+        left = _LEFT_MARGIN + (max_w - w) / 2 + 0.2
+        top  = _CONTENT_TOP + 0.05
+
+        slide.shapes.add_picture(
+            image_path,
+            left=Inches(left), top=Inches(top),
+            width=Inches(w), height=Inches(h))
+
+        if caption:
+            self._add_textbox(slide, caption,
+                              left=Inches(_LEFT_MARGIN), top=Inches(top + h + 0.12),
+                              width=Inches(_SLIDE_W), height=Inches(0.45),
+                              font_size=Pt(max(self.min_font - 6, 13)),
+                              color=BRAND["text_muted"], alignment=PP_ALIGN.CENTER)
 
     def save(self, output_path: str):
         os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)

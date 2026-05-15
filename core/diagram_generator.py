@@ -177,80 +177,287 @@ class DiagramGenerator:
         return result
 
     def generate_placeholder_image(self, diagram_spec: dict, filename: str) -> str:
-        """Generate a matplotlib-based placeholder for the diagram when Excalidraw export isn't available."""
+        """
+        Render diagram at EXACT PPT embedding size (11.0" × 4.04") so that
+        fontsize=22 in matplotlib = 22 pt visually in the final PPT slide.
+        Boxes are always wider than tall (horizontal rectangles).
+        """
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
+        from collections import defaultdict, deque
+        import textwrap
 
-        fig, ax = plt.subplots(figsize=(12, 7))
-        ax.set_xlim(0, 100)
-        ax.set_ylim(0, 60)
-        ax.set_aspect("equal")
+        diagram_type = diagram_spec.get("type", "flowchart")
+        title        = diagram_spec.get("title", "")
+        elements     = diagram_spec.get("elements", [])
+        connections  = diagram_spec.get("connections", [])
+
+        # ── These MUST match ppt_renderer._add_diagram_slide embedding ──────
+        # width=Inches(11.0), height=Inches(_CONTENT_H - 0.2) = 4.04"
+        FIG_W, FIG_H = 11.0, 4.04
+
+        FILL   = {"blue": "#DBEAFE", "green": "#D1FAE5", "orange": "#FED7AA",
+                  "red": "#FEE2E2", "purple": "#EDE9FE", "navy": "#EEF2FF",
+                  "default": "#F1F5F9"}
+        BORDER = {"blue": "#2563EB", "green": "#16A34A", "orange": "#F97316",
+                  "red": "#DC2626", "purple": "#7C3AED", "navy": "#1E3A5F",
+                  "default": "#94A3B8"}
+
+        def gc(group):
+            g = (group or "blue").lower()
+            return FILL.get(g, FILL["default"]), BORDER.get(g, BORDER["default"])
+
+        # Create figure at exact embedding size with axes filling the whole figure
+        fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        ax.set_xlim(0, FIG_W)
+        ax.set_ylim(0, FIG_H)
         ax.axis("off")
+        fig.patch.set_facecolor("white")
 
-        diagram_type = diagram_spec.get("type", "architecture")
-        title = diagram_spec.get("title", "Diagram")
-        elements = diagram_spec.get("elements", [])
-        connections = diagram_spec.get("connections", [])
+        # Title strip at the top
+        TITLE_H = 0.38
+        if title:
+            ax.text(FIG_W / 2, FIG_H - TITLE_H / 2, title,
+                    ha="center", va="center", fontsize=13, fontweight="bold",
+                    color="#1E3A5F", zorder=5)
+            ax.axhline(y=FIG_H - TITLE_H, xmin=0, xmax=1,
+                       color="#E5E7EB", linewidth=1, zorder=1)
 
-        ax.text(50, 57, title, ha="center", va="top", fontsize=18,
-                fontweight="bold", color="#1E3A5F")
+        # Usable drawing area (in inches = data coords)
+        MX = 0.25   # left/right margin
+        MY = 0.15   # top/bottom margin inside body
+        BODY_TOP = FIG_H - TITLE_H - MY   # top of drawing area
+        BODY_BOT = MY                     # bottom of drawing area
+        BODY_H   = BODY_TOP - BODY_BOT    # total usable height ≈ 3.16"
+        BODY_CY  = (BODY_TOP + BODY_BOT) / 2
 
-        colors = {"blue": "#DBEAFE", "green": "#D1FAE5", "purple": "#EDE9FE",
-                  "orange": "#FED7AA", "red": "#FECACA"}
-        border_colors = {"blue": "#2563EB", "green": "#16A34A", "purple": "#8B5CF6",
-                         "orange": "#F59E0B", "red": "#EF4444"}
+        positions  = {}
+        elem_by_id = {e.get("id", f"_{i}"): e for i, e in enumerate(elements)}
+        for i, e in enumerate(elements):
+            e.setdefault("id", f"_{i}")
 
-        if elements:
-            n = len(elements)
-            cols = min(n, 4)
-            rows = (n + cols - 1) // cols
-            box_w = 80 / cols
-            box_h = min(10, 40 / rows)
+        # ── draw_box: cx/cy/bw/bh in inches (= data coords) ─────────────────
+        def draw_box(cx, cy, bw, bh, label, group, fontsize=22, zorder=3):
+            fill, border = gc(group)
+            rect = patches.FancyBboxPatch(
+                (cx - bw / 2, cy - bh / 2), bw, bh,
+                boxstyle="round,pad=0.03",
+                facecolor=fill, edgecolor=border,
+                linewidth=2, zorder=zorder)
+            ax.add_patch(rect)
+            # Horizontal padding: 0.18" each side; vertical padding baked into bh
+            H_PAD = 0.18
+            inner_w = max(0.1, bw - 2 * H_PAD)
+            # Avg char width for regular (non-bold) Calibri ≈ fontsize*0.48/72 inches
+            avg_cw  = fontsize * 0.48 / 72
+            chars   = max(5, int(inner_w / avg_cw))
+            lines   = textwrap.wrap(str(label), width=chars) or [str(label)]
+            wrapped = "\n".join(lines)
+            txt = ax.text(cx, cy, wrapped,
+                          ha="center", va="center",
+                          fontsize=fontsize, fontweight="normal",   # NOT bold
+                          color="#1F2937", zorder=zorder + 1,
+                          multialignment="center",
+                          linespacing=1.3)
+            txt.set_clip_path(rect)
+            txt.set_clip_on(True)
 
-            positions = {}
-            for i, elem in enumerate(elements):
-                row = i // cols
-                col = i % cols
-                x = 10 + col * (box_w + 3)
-                y = 45 - row * (box_h + 5)
+        # ── draw_arrow: coordinates in inches ────────────────────────────────
+        def draw_arrow(sx, sy, dx, dy, label="", color="#6B7280"):
+            ax.annotate("", xy=(dx, dy), xytext=(sx, sy),
+                        arrowprops=dict(
+                            arrowstyle="-|>",
+                            color=color, lw=1.5,
+                            connectionstyle="arc3,rad=0.03",
+                            mutation_scale=12),
+                        zorder=6)
+            if label:
+                ax.text((sx + dx) / 2, (sy + dy) / 2 + 0.08,
+                        label, ha="center", fontsize=9, color="#6B7280", zorder=7)
 
-                group = elem.get("group", "blue")
-                color_key = elem.get("color", group)
-                if color_key not in colors:
-                    color_key = "blue"
+        # ── TIMELINE ─────────────────────────────────────────────────────────
+        if diagram_type == "timeline":
+            n    = max(len(elements), 1)
+            bw_t = min(1.6, (FIG_W - 2 * MX) / max(n, 1) * 0.78)
+            bh_t = 0.72
+            # Keep box centres at least bw/2 inside each edge so nothing clips
+            x0   = MX + bw_t / 2
+            x1   = FIG_W - MX - bw_t / 2
+            xs   = [x0 + (x1 - x0) * i / max(n - 1, 1) for i in range(n)]
 
-                rect = patches.FancyBboxPatch(
-                    (x, y), box_w, box_h,
-                    boxstyle="round,pad=0.5",
-                    facecolor=colors[color_key],
-                    edgecolor=border_colors[color_key],
-                    linewidth=2)
-                ax.add_patch(rect)
-                ax.text(x + box_w / 2, y + box_h / 2, elem.get("label", elem.get("id", "")),
-                        ha="center", va="center", fontsize=10, fontweight="bold",
-                        color="#1F2937")
-                positions[elem["id"]] = (x + box_w / 2, y + box_h / 2)
+            mid_y = BODY_CY
+            # Baseline runs only between the first and last box centre
+            ax.plot([xs[0], xs[-1]], [mid_y, mid_y],
+                    color="#1E3A5F", linewidth=2.5, zorder=1)
+
+            for i, (elem, x) in enumerate(zip(elements, xs)):
+                above  = (i % 2 == 0)
+                cy     = mid_y + (0.82 if above else -0.82)
+                _, brd = gc(elem.get("group", "blue"))
+                ax.plot([x, x], [mid_y, cy + (-bh_t / 2 if above else bh_t / 2)],
+                        color=brd, lw=1.5, zorder=2)
+                ax.plot(x, mid_y, "o", color=brd, markersize=9, zorder=3)
+                draw_box(x, cy, bw_t, bh_t, elem.get("label", ""),
+                         elem.get("group", "blue"), fontsize=13)
+                positions[elem["id"]] = (x, cy)
+
+        # ── COMPARISON ───────────────────────────────────────────────────────
+        elif diagram_type == "comparison":
+            mid       = max(len(elements) // 2, 1)
+            left_els  = elements[:mid]
+            right_els = elements[mid:]
+            cx_l, cx_r = FIG_W * 0.27, FIG_W * 0.73
+
+            ax.text(cx_l, BODY_TOP + 0.05, "BEFORE / CURRENT",
+                    ha="center", fontsize=12, fontweight="bold", color="#DC2626")
+            ax.text(cx_r, BODY_TOP + 0.05, "AFTER / PROPOSED",
+                    ha="center", fontsize=12, fontweight="bold", color="#16A34A")
+            ax.axvline(x=FIG_W / 2, ymin=0, ymax=1,
+                       color="#E5E7EB", linewidth=1.5, linestyle="--", zorder=1)
+
+            col_bw = (FIG_W / 2 - 2 * MX) * 0.92
+            for col_elems, cx_b, def_grp in [
+                (left_els, cx_l, "red"), (right_els, cx_r, "green")
+            ]:
+                n   = max(len(col_elems), 1)
+                bh  = min(0.80, (BODY_H - (n - 1) * 0.15) / n)
+                gap = (BODY_H - n * bh) / max(n - 1, 1) if n > 1 else 0
+                y0  = BODY_BOT + bh / 2
+                for j, elem in enumerate(col_elems):
+                    cy = y0 + j * (bh + gap)
+                    draw_box(cx_b, cy, col_bw, bh,
+                             elem.get("label", ""), elem.get("group", def_grp),
+                             fontsize=16)
+                    positions[elem["id"]] = (cx_b, cy)
+
+        # ── ARCHITECTURE ─────────────────────────────────────────────────────
+        elif diagram_type == "architecture":
+            groups = defaultdict(list)
+            for elem in elements:
+                groups[elem.get("group", "blue")].append(elem)
+            gkeys = list(groups.keys()) or ["blue"]
+            n_g   = len(gkeys)
+            col_w = (FIG_W - 2 * MX) / n_g
+
+            for gi, gkey in enumerate(gkeys):
+                cx     = MX + gi * col_w + col_w / 2
+                fill, border = gc(gkey)
+                zone = patches.FancyBboxPatch(
+                    (cx - col_w / 2 + 0.06, BODY_BOT), col_w - 0.12, BODY_H,
+                    boxstyle="round,pad=0.05",
+                    facecolor=fill, edgecolor=border,
+                    linewidth=1.5, alpha=0.22, zorder=1)
+                ax.add_patch(zone)
+                ax.text(cx, BODY_TOP - 0.10, gkey.replace("_", " ").title(),
+                        ha="center", fontsize=11, fontweight="normal",
+                        color=border, zorder=2)
+
+                col_elems = groups[gkey]
+                n   = max(len(col_elems), 1)
+                bw  = col_w * 0.82
+                bh  = min(0.72, (BODY_H - 0.35 - (n - 1) * 0.15) / n)
+                gap = (BODY_H - 0.35 - n * bh) / max(n - 1, 1) if n > 1 else 0
+                y0  = BODY_BOT + bh / 2
+                for j, elem in enumerate(col_elems):
+                    cy = y0 + j * (bh + gap)
+                    draw_box(cx, cy, bw, bh,
+                             elem.get("label", ""), gkey, fontsize=15, zorder=3)
+                    positions[elem["id"]] = (cx, cy)
 
             for conn in connections:
-                src = conn.get("from", "")
-                dst = conn.get("to", "")
-                if src in positions and dst in positions:
-                    sx, sy = positions[src]
-                    dx, dy = positions[dst]
-                    ax.annotate("", xy=(dx, dy), xytext=(sx, sy),
-                                arrowprops=dict(arrowstyle="->", color="#6B7280", lw=1.5))
-                    if conn.get("label"):
-                        mx, my = (sx + dx) / 2, (sy + dy) / 2
-                        ax.text(mx, my + 1.5, conn["label"], ha="center", fontsize=8,
-                                color="#6B7280")
+                s, d = conn.get("from"), conn.get("to")
+                if s in positions and d in positions:
+                    sx, sy = positions[s]
+                    dx, dy = positions[d]
+                    _, brd = gc(elem_by_id.get(s, {}).get("group", "blue"))
+                    draw_arrow(sx + 0.4, sy, dx - 0.4, dy,
+                               conn.get("label", ""), color=brd)
+
+        # ── FLOWCHART: horizontal rectangles, topological left→right layout ──
         else:
-            ax.text(50, 30, f"[{diagram_type.title()} Diagram]", ha="center", va="center",
-                    fontsize=16, color="#6B7280", style="italic")
+            id_set = {e["id"] for e in elements}
+            adj    = defaultdict(list)
+            in_deg = defaultdict(int)
+            for conn in connections:
+                s, d = conn.get("from"), conn.get("to")
+                if s in id_set and d in id_set:
+                    adj[s].append(d)
+                    in_deg[d] += 1
+
+            levels = {}
+            queue  = deque()
+            for e in elements:
+                eid = e["id"]
+                if in_deg.get(eid, 0) == 0:
+                    levels[eid] = 0
+                    queue.append(eid)
+            while queue:
+                node = queue.popleft()
+                for nxt in adj[node]:
+                    if nxt not in levels:
+                        levels[nxt] = levels[node] + 1
+                        queue.append(nxt)
+            for e in elements:
+                levels.setdefault(e["id"], 0)
+
+            level_nodes = defaultdict(list)
+            for eid, lv in levels.items():
+                level_nodes[lv].append(eid)
+
+            n_levels = max(level_nodes.keys(), default=0) + 1
+            max_per  = max((len(v) for v in level_nodes.values()), default=1)
+
+            # Font: 22pt for ≤6 levels, scale down for wider diagrams
+            BOX_FONT = 22 if n_levels <= 6 else max(14, int(22 * 6 / n_levels))
+
+            usable_w = FIG_W - 2 * MX
+            x_step   = usable_w / n_levels
+            # Box is a HORIZONTAL rectangle: bw > bh
+            bw = x_step * 0.82
+
+            # Height: 2 lines of text + generous top/bottom padding (0.20" each side)
+            line_h = BOX_FONT / 72          # inches per line of text
+            V_PAD  = 0.22                   # vertical padding top + bottom
+            bh     = line_h * 2 * 1.3 + V_PAD   # 2 lines with spacing + padding
+            # Cap so all nodes fit vertically; floor so at least 1 line fits
+            bh     = min(bh, (BODY_H - (max_per - 1) * 0.18) / max(max_per, 1))
+            bh     = max(bh, line_h * 1.3 + V_PAD)
+
+            # Gap between stacked nodes — minimum 0.18" breathing room
+            gap_y  = (BODY_H - max_per * bh) / max(max_per - 1, 1)
+            gap_y  = max(0.18, min(gap_y, 0.40))
+
+            for lv in sorted(level_nodes.keys()):
+                nodes = level_nodes[lv]
+                n  = len(nodes)
+                cx = MX + lv * x_step + x_step / 2
+
+                total_h = n * bh + (n - 1) * gap_y
+                y_start = BODY_CY - total_h / 2 + bh / 2
+
+                for i, node_id in enumerate(nodes):
+                    cy   = y_start + i * (bh + gap_y)
+                    elem = elem_by_id.get(node_id, {})
+                    draw_box(cx, cy, bw, bh,
+                             elem.get("label", node_id),
+                             elem.get("group", "blue"),
+                             fontsize=BOX_FONT)
+                    positions[node_id] = (cx, cy)
+
+            for conn in connections:
+                s, d = conn.get("from"), conn.get("to")
+                if s in positions and d in positions:
+                    sx, sy = positions[s]
+                    dx, dy = positions[d]
+                    _, brd = gc(elem_by_id.get(s, {}).get("group", "blue"))
+                    draw_arrow(sx + bw / 2, sy, dx - bw / 2, dy,
+                               conn.get("label", ""), color=brd)
 
         output_path = os.path.join(self.output_dir, filename)
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
+        # Save at exact figsize — NO bbox_inches='tight' which would resize
+        plt.savefig(output_path, dpi=150, facecolor="white")
         plt.close()
         return output_path
