@@ -33,6 +33,14 @@ def _try_libreoffice(pptx_path: str, output_dir: str) -> list:
         r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
     ]
     base = os.path.splitext(os.path.basename(pptx_path))[0]
+
+    # How many slides does the deck have? LibreOffice must produce one PNG per slide.
+    try:
+        from pptx import Presentation as _P
+        expected_slides = len(_P(pptx_path).slides)
+    except Exception:
+        expected_slides = 1
+
     for cmd in candidates:
         try:
             r = subprocess.run(
@@ -46,7 +54,9 @@ def _try_libreoffice(pptx_path: str, output_dir: str) -> list:
                     for f in os.listdir(output_dir)
                     if f.lower().startswith(base.lower()) and f.lower().endswith(".png")
                 ])
-                if found:
+                # Only trust LibreOffice output if it produced one file per slide.
+                # Some Windows LibreOffice builds output only the first slide.
+                if len(found) >= expected_slides:
                     return found
         except Exception:
             continue

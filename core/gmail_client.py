@@ -19,20 +19,27 @@ SUPPORTED_ATTACHMENT_EXTENSIONS = {
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
-def get_auth_url(creds_data: dict, redirect_uri: str) -> tuple[str, str]:
+def get_auth_url(creds_data: dict, redirect_uri: str) -> tuple[str, str, str]:
+    """Returns (auth_url, state, code_verifier). Store code_verifier in session for the callback."""
+    import secrets, hashlib, base64
+    code_verifier = secrets.token_urlsafe(96)
     flow = Flow.from_client_config(creds_data, scopes=SCOPES)
     flow.redirect_uri = redirect_uri
+    flow.code_verifier = code_verifier
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
-    return auth_url, state
+    return auth_url, state, code_verifier
 
 
-def exchange_code(creds_data: dict, code: str, state: str, redirect_uri: str) -> Credentials:
+def exchange_code(creds_data: dict, code: str, state: str, redirect_uri: str,
+                  code_verifier: str = None) -> Credentials:
     flow = Flow.from_client_config(creds_data, scopes=SCOPES, state=state)
     flow.redirect_uri = redirect_uri
+    if code_verifier:
+        flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     return flow.credentials
 

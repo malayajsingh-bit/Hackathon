@@ -589,7 +589,7 @@ class PPTAgent:
             slide_count=len(plan),
         )
 
-        result = self.claude.generate_json(GENERATION_SYSTEM, prompt, max_tokens=8192)
+        result = self.claude.generate_json(GENERATION_SYSTEM, prompt, max_tokens=16384)
 
         slides = result if isinstance(result, list) else result.get("slides", [])
 
