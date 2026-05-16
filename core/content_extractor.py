@@ -563,6 +563,9 @@ class ContentExtractor:
     def extract_from_text(self, text: str, context: str = "") -> dict:
         return self._extract(text, context)
 
+    def extract_from_emails(self, emails_text: str, context: str = "") -> dict:
+        return self._extract(emails_text, context)
+
     def extract_from_topic(self, topic: str, context: str = "") -> dict:
         prompt = f"Topic: {topic}\n\nAdditional context: {context}" if context else f"Topic: {topic}"
         return self._extract(prompt, context)
