@@ -152,32 +152,146 @@ def read_image(file_path: str) -> str:
 
 
 def read_url(url: str) -> str:
-    """Fetch and extract text content from a webpage."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = requests.get(url.strip(), headers=headers, timeout=15)
-        resp.raise_for_status()
-        html = resp.text
+    """
+    Fetch a webpage and extract clean, structured text using BeautifulSoup.
+    Retries with SSL disabled on certificate errors.
+    """
+    import re
+    from bs4 import BeautifulSoup
 
-        # Simple HTML to text extraction (no BeautifulSoup dependency)
-        import re
-        # Remove script and style tags
-        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        # Remove HTML tags
-        text = re.sub(r'<[^>]+>', ' ', html)
-        # Clean whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        # Decode HTML entities
-        text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-        text = text.replace('&nbsp;', ' ').replace('&quot;', '"')
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
 
-        if len(text) > 20000:
-            text = text[:20000] + "\n\n[TRUNCATED]"
+    HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+    }
 
-        return f"--- Webpage: {url} ---\n{text}"
-    except Exception as e:
-        return f"Error fetching URL {url}: {e}"
+    # ── 1. Fetch with retry + SSL fallback ───────────────────────────────
+    resp     = None
+    last_err = "unknown error"
+    for verify_ssl in (True, False):
+        for _ in range(2):
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=25,
+                                 verify=verify_ssl, allow_redirects=True)
+                r.raise_for_status()
+                resp = r
+                break
+            except requests.exceptions.SSLError:
+                last_err = "SSL certificate error"
+                break
+            except requests.exceptions.Timeout:
+                last_err = "request timed out (25 s)"
+            except requests.exceptions.ConnectionError as e:
+                last_err = f"connection error: {e}"
+            except requests.exceptions.HTTPError as e:
+                last_err = f"HTTP {e.response.status_code}"
+                break
+            except Exception as e:
+                last_err = str(e)
+        if resp is not None:
+            break
+
+    if resp is None:
+        return (
+            f"[URL fetch failed] {url}\n"
+            f"Reason: {last_err}\n"
+            "If the site requires login or blocks bots, paste the content directly."
+        )
+
+    # ── 2. Parse with BeautifulSoup ──────────────────────────────────────
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # Page title
+    page_title = ""
+    if soup.title and soup.title.string:
+        page_title = soup.title.string.strip()
+
+    # Meta description — useful context for the LLM
+    meta_desc = ""
+    for m in soup.find_all("meta"):
+        if m.get("name", "").lower() in ("description", "og:description") \
+                or m.get("property", "").lower() in ("og:description",):
+            meta_desc = m.get("content", "").strip()
+            if meta_desc:
+                break
+
+    # ── 3. Remove all non-content elements ───────────────────────────────
+    STRIP_TAGS = [
+        "script", "style", "nav", "footer", "header", "aside",
+        "iframe", "noscript", "svg", "form", "button", "input",
+        "select", "textarea", "dialog", "menu", "menuitem",
+        "link", "meta", "figure",                # keep figcaption if needed
+    ]
+    for tag in soup(STRIP_TAGS):
+        tag.decompose()
+
+    # ── 4. Find main content region ──────────────────────────────────────
+    CONTENT_RE = re.compile(
+        r"\b(content|main|article|post|entry|body|story|text)\b", re.I)
+
+    content_zone = (
+        soup.find("main") or
+        soup.find("article") or
+        soup.find(id=CONTENT_RE) or
+        soup.find(class_=CONTENT_RE) or
+        soup.find(role="main") or
+        soup.body
+    )
+
+    # ── 5. Extract structured text blocks ────────────────────────────────
+    TEXT_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6",
+                 "p", "li", "td", "th", "blockquote",
+                 "dt", "dd", "figcaption", "caption", "label"]
+
+    lines = []
+    seen  = set()
+
+    if content_zone:
+        for el in content_zone.find_all(TEXT_TAGS):
+            line = el.get_text(separator=" ", strip=True)
+            # Deduplicate and drop very short fragments (nav remnants)
+            if line and len(line) > 20 and line not in seen:
+                seen.add(line)
+                # Add a blank line after headings for readability
+                prefix_nl = "\n" if el.name in ("h1","h2","h3","h4","h5","h6") else ""
+                lines.append(prefix_nl + line)
+    else:
+        lines = [l.strip() for l in soup.get_text("\n").splitlines() if len(l.strip()) > 20]
+
+    body_text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+    # ── 6. Assemble final output ──────────────────────────────────────────
+    if not body_text or len(body_text) < 80:
+        return (
+            f"[Low content] {url}\n"
+            "Very little text could be extracted. "
+            "The page likely requires JavaScript (React/Angular SPA). "
+            "Paste the article text directly for best results."
+        )
+
+    if len(body_text) > 25000:
+        body_text = body_text[:25000] + "\n\n[...content truncated at 25 000 chars...]"
+
+    sections = [f"--- Webpage: {url} ---"]
+    if page_title:
+        sections.append(f"Title: {page_title}")
+    if meta_desc:
+        sections.append(f"Description: {meta_desc}")
+    sections.append("")
+    sections.append(body_text)
+
+    return "\n".join(sections)
 
 
 def read_google_sheet_csv(url: str) -> str:
@@ -448,6 +562,9 @@ class ContentExtractor:
 
     def extract_from_text(self, text: str, context: str = "") -> dict:
         return self._extract(text, context)
+
+    def extract_from_emails(self, emails_text: str, context: str = "") -> dict:
+        return self._extract(emails_text, context)
 
     def extract_from_topic(self, topic: str, context: str = "") -> dict:
         prompt = f"Topic: {topic}\n\nAdditional context: {context}" if context else f"Topic: {topic}"
