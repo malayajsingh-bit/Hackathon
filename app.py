@@ -141,7 +141,7 @@ with st.sidebar:
                                 value="https://imllm.intermesh.net/v1",
                                 help="Indiamart LLM Gateway (OpenAI-compatible)")
     api_key = st.text_input("API Key", type="password",
-                            value="sk-fOjolFOnhGoJidHjUlFIHA",
+                            value="sk-fxxxxxxxxxxxxxxxxxxxxx",
                             placeholder="Your LLM Gateway access key (sk-xxx)")
     model_name = st.text_input("Model Name",
                                value="google/gemini-3-flash-preview",
@@ -190,13 +190,15 @@ elif _gmail_code and _gmail_state:
             )
             _creds_data = st.session_state.get("gmail_creds_data")
             if _creds_data:
+                _cv = st.session_state.get("gmail_code_verifier") or None
                 _creds = _gmail_exchange(_creds_data, _gmail_code, _gmail_state,
-                                         "http://localhost:8501")
+                                         "http://localhost:8501", code_verifier=_cv)
                 st.session_state.gmail_credentials_json = _creds_to_json(_creds)
                 _svc = _build_svc(_creds)
                 _profile = _get_profile(_svc)
                 st.session_state.gmail_user_email = _profile.get("email", "connected")
                 st.session_state.pop("gmail_oauth_state", None)
+                st.session_state.pop("gmail_code_verifier", None)
         except Exception as _e:
             st.error(f"Gmail OAuth failed: {_e}")
         st.query_params.clear()
@@ -410,11 +412,12 @@ with st.expander("🔌 Integrations  —  GitHub / OpenProject / Google Sheets /
                         if st.button("🔐 Login with Google", key="gmail_connect_btn",
                                      use_container_width=True, type="primary"):
                             try:
-                                _auth_url, _state = _get_auth_url(
+                                _auth_url, _state, _cv = _get_auth_url(
                                     st.session_state.gmail_creds_data, "http://localhost:8501"
                                 )
-                                st.session_state.gmail_oauth_state = _state
-                                st.session_state.gmail_auth_url = _auth_url
+                                st.session_state.gmail_oauth_state   = _state
+                                st.session_state.gmail_code_verifier = _cv
+                                st.session_state.gmail_auth_url      = _auth_url
                             except Exception as _e:
                                 st.error(f"Could not generate auth URL: {_e}")
 

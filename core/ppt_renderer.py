@@ -81,29 +81,16 @@ class PPTRenderer:
     def add_title_slide(self, title: str, subtitle: str, date: str):
         slide = self.prs.slides.add_slide(self._title_slide_layout())
 
-        # First-slide geometry (hardcoded — independent of content-slide constants)
-        # Title  : Y=1.57"  (aligned with grey line in template), font 32pt
-        # Content: Y=3.09"  (below grey line), one textbox
-        # X width: textbox center at (slide_center - 3) keeps right half free for logo
-        #   slide_center = 13.333/2 = 6.667"  →  center = 3.667"
-        #   left = 0.70"  →  width = 2×(3.667 - 0.70) = 5.93"
-        _TS_Y_TITLE   = 1.57
-        _TS_Y_CONTENT = 3.09
-        _TS_FONT      = 32
-        _TS_LEFT      = _LEFT_MARGIN                        # 0.70"
-        _TS_WIDTH     = 2 * (13.333 / 2 - 3.0 - _LEFT_MARGIN)  # ~5.93"
-
-        # Strip ALL placeholders — we place everything ourselves so positions
-        # are exact and no template placeholder overrides our layout.
+        # Strip ALL placeholders — we own every shape on this slide
         for ph in list(slide.placeholders):
             ph._element.getparent().remove(ph._element)
 
-        # Estimate how many lines the title will wrap to inside the textbox.
-        # At 32pt Calibri on a 5.93" wide box ≈ 22 chars per line (conservative).
-        # Use that to pick Y-start and font so text always stays above the grey line.
-        #   1-2 lines → Y=1.57, font=32
-        #   3 lines   → Y=1.29, font=30
-        #   4+ lines  → Y=0.71, font=30
+        _TS_LEFT      = _LEFT_MARGIN  # 0.70"
+        _TS_WIDTH     = 6.0           # max 6" — keeps right half clear for logo
+        _TS_Y_CONTENT = 3.09          # grey line / subtitle Y position
+
+        # Estimate wrapped lines at ~30 chars per line on a 6" box at 32pt.
+        # Adjust Y-start and font so all lines sit above the grey line.
         CHARS_PER_LINE = 30
         est_lines = max(1, (len(title) + CHARS_PER_LINE - 1) // CHARS_PER_LINE)
 
@@ -114,15 +101,17 @@ class PPTRenderer:
         else:
             ts_y, ts_font = 0.71, 30
 
-        # Height fills from ts_y to just above the grey line (grey line ≈ content_top - 0.28)
+        # Height fills from ts_y up to just above the grey line
         ts_h = _TS_Y_CONTENT - ts_y - 0.28
 
-        # ONE textbox — word_wrap=True, no auto_size so PowerPoint never splits it
+        # ONE title textbox — word_wrap keeps all lines inside the box,
+        # TEXT_TO_FIT_SHAPE shrinks font if the estimate was off so text never clips.
         txBox = slide.shapes.add_textbox(
             Inches(_TS_LEFT), Inches(ts_y),
             Inches(_TS_WIDTH), Inches(ts_h))
         tf = txBox.text_frame
         tf.word_wrap = True
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         p = tf.paragraphs[0]
         run = p.add_run()
         run.text = title

@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Indiamart PPT Generator</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ─── Sidebar ──────────────────────────────────────────────────────────── -->
+<aside id="sidebar">
+  <div class="sidebar-logo">📊 Indiamart PPT</div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-label">⚙️ LLM Gateway Configuration</div>
+
+    <label class="field-label" for="sb-url">Gateway Base URL</label>
+    <input type="text" id="sb-url" placeholder="https://imllm.intermesh.net/v1"
+           title="Indiamart LLM Gateway (OpenAI-compatible)" />
+
+    <div class="gap-top">
+      <label class="field-label" for="sb-key">API Key</label>
+      <input type="password" id="sb-key" placeholder="Your LLM Gateway key (sk-xxx)" />
+    </div>
+
+    <div class="gap-top">
+      <label class="field-label" for="sb-model">Model Name</label>
+      <input type="text" id="sb-model" placeholder="google/gemini-3-flash-preview"
+             title="Model identifier — use the model you have access to" />
+    </div>
+
+    <div class="gap-top">
+      <button class="btn btn-primary btn-full btn-sm" id="btn-save-config">Save Config</button>
+    </div>
+    <div id="config-status" class="sidebar-status warn hidden">Both URL and API key are required</div>
+  </div>
+
+  <hr class="sidebar-divider" />
+
+  <div class="sidebar-section">
+    <div class="sidebar-label">How it works</div>
+    <ol class="sidebar-how" style="padding-left:18px; list-style:decimal;">
+      <li>Pick a primary source — paste text, upload a file, enter a topic, URL, or update an existing PPT</li>
+      <li>Add more sources — combine URL + screenshots + docs freely</li>
+      <li>Select leader — choose who you're presenting to</li>
+      <li>Review plan — edit the slide structure</li>
+      <li>Generate PPT — download your presentation</li>
+    </ol>
+  </div>
+
+  <hr class="sidebar-divider" />
+  <div style="font-size:11px;color:#9CA3AF;text-align:center">Built for Indiamart Hackathon 2026</div>
+</aside>
+
+<!-- ─── Main Content ──────────────────────────────────────────────────────── -->
+<div id="main-content">
+  <p class="main-header">📊 Indiamart Presentation Generator</p>
+  <p class="sub-header">AI-powered PPTs tailored to your leadership's preferences</p>
+  <hr class="page-divider" />
+
+  <!-- Notifications -->
+  <div id="global-alert"></div>
+
+  <!-- ── Step 1: Content ─────────────────────────────────────────────────── -->
+  <section id="step-1">
+    <p class="step-header">Step 1: Provide Content</p>
+
+    <div class="section-label">Primary source</div>
+    <div class="radio-group" id="primary-radio">
+      <label class="radio-option active" data-mode="text">
+        <input type="radio" name="primary_mode" value="text" checked /> 📝 Paste Text
+      </label>
+      <label class="radio-option" data-mode="files">
+        <input type="radio" name="primary_mode" value="files" /> 📁 Upload File
+      </label>
+      <label class="radio-option" data-mode="topic">
+        <input type="radio" name="primary_mode" value="topic" /> 💡 Enter Topic
+      </label>
+      <label class="radio-option" data-mode="url">
+        <input type="radio" name="primary_mode" value="url" /> 🌐 URL / Webpage
+      </label>
+      <label class="radio-option" data-mode="update_ppt">
+        <input type="radio" name="primary_mode" value="update_ppt" /> 🔄 Update Existing PPT
+      </label>
+    </div>
+
+    <!-- Mode panels -->
+    <div id="mode-text" class="mode-panel">
+      <label class="field-label">Paste your content here</label>
+      <textarea id="pasted-text" rows="8" placeholder="Paste report data, bullet points, metrics, meeting notes…"></textarea>
+      <div class="gap-top">
+        <label class="field-label">Additional context (optional)</label>
+        <textarea id="paste-context" rows="3" placeholder="e.g. This is for the quarterly business review"></textarea>
+      </div>
+    </div>
+
+    <div id="mode-files" class="mode-panel hidden">
+      <label class="field-label">Upload files (Excel / CSV / PDF / Doc)</label>
+      <div class="file-drop" id="drop-primary" data-target="primary-files">
+        <span>📁 Click to browse or drag & drop</span><br/>
+        <small>csv, xlsx, xls, pdf, docx, txt, md</small>
+        <input type="file" id="primary-files" multiple accept=".csv,.xlsx,.xls,.pdf,.docx,.txt,.md" />
+      </div>
+      <div class="file-list" id="primary-files-list"></div>
+      <div class="gap-top">
+        <label class="field-label">What should the presentation focus on?</label>
+        <textarea id="primary-file-ctx" rows="3" placeholder="e.g. Compare Q1 vs Q2, highlight top 5 cities…"></textarea>
+      </div>
+    </div>
+
+    <div id="mode-topic" class="mode-panel hidden">
+      <label class="field-label">Presentation topic</label>
+      <input type="text" id="topic-input" placeholder="e.g. Q1 2026 Seller Engagement Results" />
+      <div class="gap-top">
+        <label class="field-label">Key points and context</label>
+        <textarea id="topic-context" rows="5" placeholder="e.g. DAU grew 23%, revenue up 1.2 Cr, launched AI lead scoring…"></textarea>
+      </div>
+    </div>
+
+    <div id="mode-url" class="mode-panel hidden">
+      <label class="field-label">Enter webpage URL</label>
+      <input type="url" id="primary-url" placeholder="https://…" />
+      <div class="gap-top">
+        <label class="field-label">What to extract from this page? (optional)</label>
+        <textarea id="primary-url-ctx" rows="3" placeholder="e.g. Summarise the pricing plans and compare with ours"></textarea>
+      </div>
+    </div>
+
+    <div id="mode-update-ppt" class="mode-panel hidden">
+      <label class="field-label">Upload existing presentation to update</label>
+      <div class="file-drop" id="drop-old-ppt" data-target="old-ppt-file">
+        <span>📊 Click to browse or drag & drop (.pptx)</span>
+        <input type="file" id="old-ppt-file" accept=".pptx" />
+      </div>
+      <div class="file-list" id="old-ppt-list"></div>
+
+      <div class="gap-top">
+        <label class="field-label">Upload new data (optional)</label>
+        <div class="file-drop" data-target="new-data-files">
+          <span>📁 csv, xlsx, xls, pdf, docx, txt</span>
+          <input type="file" id="new-data-files" multiple accept=".csv,.xlsx,.xls,.pdf,.docx,.txt" />
+        </div>
+        <div class="file-list" id="new-data-list"></div>
+      </div>
+
+      <div class="gap-top">
+        <label class="field-label">Or paste new data / updates</label>
+        <textarea id="new-text-ppt" rows="3" placeholder="e.g. Q2 revenue: ₹4.5 Cr (up from ₹3.8 Cr), DAU now 1.4 M…"></textarea>
+      </div>
+      <div class="gap-top">
+        <label class="field-label">Update instructions (optional)</label>
+        <textarea id="ppt-update-ctx" rows="3" placeholder="e.g. Keep same structure, update all numbers to Q2, add new churn slide"></textarea>
+      </div>
+      <p style="font-size:12px;color:#6B7280;margin-top:6px">AI reads the old PPT, keeps the same slide structure, and refreshes content with new data.</p>
+    </div>
+
+    <!-- ── Additional sources ──────────────────────────────────────────── -->
+    <hr class="page-divider" style="margin:20px 0 14px;" />
+    <div class="section-label">➕ Additional sources — optional, all will be merged</div>
+
+    <div class="row">
+      <div class="col-1">
+        <label class="field-label">🌐 URL / Webpage</label>
+        <input type="url" id="extra-url" placeholder="https://… (leave blank to skip)" />
+        <div class="gap-top">
+          <label class="field-label">URL focus (optional)</label>
+          <textarea id="extra-url-ctx" rows="2" placeholder="e.g. Extract pricing and feature comparisons"></textarea>
+        </div>
+        <div class="gap-top">
+          <label class="field-label">📄 Documents (PDF / Word / TXT)</label>
+          <div class="file-drop" data-target="extra-docs">
+            <span>Click to browse</span>
+            <input type="file" id="extra-docs" multiple accept=".pdf,.docx,.txt,.md" />
+          </div>
+          <div class="file-list" id="extra-docs-list"></div>
+        </div>
+      </div>
+
+      <div class="col-1">
+        <label class="field-label">🖼️ Screenshots / Images</label>
+        <div class="file-drop" data-target="extra-images">
+          <span>Click to browse</span>
+          <input type="file" id="extra-images" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" />
+        </div>
+        <div class="file-list" id="extra-images-list"></div>
+        <div class="gap-top">
+          <label class="field-label">Describe these images (optional)</label>
+          <textarea id="extra-img-ctx" rows="2" placeholder="e.g. Screenshot 1 = our dashboard, Screenshot 2 = competitor"></textarea>
+        </div>
+        <div class="gap-top">
+          <label class="field-label">📊 Data Files (Excel / CSV)</label>
+          <div class="file-drop" data-target="extra-data">
+            <span>Click to browse</span>
+            <input type="file" id="extra-data" multiple accept=".csv,.xlsx,.xls" />
+          </div>
+          <div class="file-list" id="extra-data-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Integrations ────────────────────────────────────────────────── -->
+    <details class="integrations-block">
+      <summary>🔌 Integrations — GitHub / OpenProject / Google Sheets / Gmail</summary>
+      <div class="integrations-body">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="tab-github">🐙 GitHub</button>
+          <button class="tab-btn"        data-tab="tab-openproject">📋 OpenProject</button>
+          <button class="tab-btn"        data-tab="tab-gsheet">📊 Google Sheets</button>
+          <button class="tab-btn"        data-tab="tab-gmail">📧 Gmail</button>
+        </div>
+
+        <!-- GitHub -->
+        <div id="tab-github" class="tab-panel active">
+          <label class="field-label">GitHub Repository URL</label>
+          <input type="url" id="github-url" placeholder="https://github.com/org/repo" />
+          <div class="gap-top">
+            <label class="field-label">What should the presentation focus on?</label>
+            <textarea id="github-context" rows="3" placeholder="e.g. Project overview and architecture for CTO review"></textarea>
+          </div>
+          <p style="font-size:12px;color:#6B7280;margin-top:6px">Reads README, directory structure, config files, source code, and recent commits.</p>
+        </div>
+
+        <!-- OpenProject -->
+        <div id="tab-openproject" class="tab-panel">
+          <div class="row">
+            <div class="col-1">
+              <label class="field-label">OpenProject Base URL</label>
+              <input type="url" id="op-url" placeholder="https://openproject.indiamart.com" />
+            </div>
+            <div class="col-1">
+              <label class="field-label">Project ID (optional)</label>
+              <input type="text" id="op-project" placeholder="e.g. seller-engagement" />
+            </div>
+          </div>
+          <div class="gap-top">
+            <label class="field-label">API Key</label>
+            <input type="password" id="op-key" placeholder="Your OpenProject API key" />
+          </div>
+          <div class="gap-top">
+            <label class="field-label">Presentation focus (optional)</label>
+            <textarea id="op-context" rows="3" placeholder="e.g. Sprint progress update, blockers and risks…"></textarea>
+          </div>
+          <p style="font-size:12px;color:#6B7280;margin-top:6px">Fetches tickets, status summary, priorities, and assignee data.</p>
+        </div>
+
+        <!-- Google Sheets -->
+        <div id="tab-gsheet" class="tab-panel">
+          <label class="field-label">Google Sheets URL</label>
+          <input type="url" id="gsheet-url" placeholder="https://docs.google.com/spreadsheets/d/…" />
+          <div class="gap-top">
+            <label class="field-label">What data to focus on?</label>
+            <textarea id="gsheet-context" rows="3" placeholder="e.g. Monthly revenue trend in Sheet1, city-wise breakdown in Sheet2"></textarea>
+          </div>
+          <p style="font-size:12px;color:#6B7280;margin-top:6px">Sheet must be shared with 'Anyone with the link'. Reads data as CSV.</p>
+        </div>
+
+        <!-- Gmail -->
+        <div id="tab-gmail" class="tab-panel">
+          <div id="gmail-not-connected">
+            <div id="gmail-no-creds" class="hidden">
+              <div class="alert alert-warning">
+                <span class="alert-icon">⚠️</span>
+                Place your <code>credentials.json</code> (OAuth 2.0 Web/Desktop App) in the project folder, or upload it below.
+              </div>
+              <div class="gap-top">
+                <label class="field-label">Upload credentials.json</label>
+                <div class="file-drop" data-target="gmail-creds-file">
+                  <span>Click to upload credentials.json</span>
+                  <input type="file" id="gmail-creds-file" accept=".json" />
+                </div>
+              </div>
+            </div>
+
+            <div id="gmail-has-creds" class="hidden">
+              <button class="btn btn-primary" id="btn-gmail-login" style="margin-bottom:8px;">🔐 Login with Google</button>
+              <p style="font-size:12px;color:#6B7280">Clicking will redirect to Google's sign-in page. After approval you'll be returned here.</p>
+            </div>
+          </div>
+
+          <div id="gmail-connected" class="hidden">
+            <div class="row" style="align-items:center;margin-bottom:12px;">
+              <div class="col-4">
+                <div class="alert alert-success" style="margin:0">
+                  <span class="alert-icon">✅</span>
+                  Connected as: <strong id="gmail-email">—</strong>
+                </div>
+              </div>
+              <div>
+                <button class="btn btn-secondary btn-sm" id="btn-gmail-disconnect">Disconnect</button>
+              </div>
+            </div>
+
+            <div><strong style="font-size:13px;">Search Emails</strong></div>
+            <div class="row gap-top">
+              <div class="col-1">
+                <label class="field-label">Keywords</label>
+                <input type="text" id="gmail-kw" placeholder="e.g. invoice Q1" />
+              </div>
+              <div class="col-1">
+                <label class="field-label">From</label>
+                <input type="text" id="gmail-from" placeholder="sender@example.com" />
+              </div>
+              <div class="col-1">
+                <label class="field-label">After</label>
+                <input type="date" id="gmail-after" />
+              </div>
+              <div class="col-1">
+                <label class="field-label">Before</label>
+                <input type="date" id="gmail-before" />
+              </div>
+            </div>
+            <div class="row gap-top">
+              <div class="col-2">
+                <label class="field-label">Label</label>
+                <select id="gmail-label">
+                  <option>All</option><option>Inbox</option><option>Sent</option>
+                  <option>Starred</option><option>Important</option>
+                </select>
+              </div>
+              <div class="col-1">
+                <label class="field-label">Max results</label>
+                <select id="gmail-max">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                </select>
+              </div>
+              <div class="col-1" style="display:flex;align-items:flex-end;">
+                <button class="btn btn-primary btn-full" id="btn-gmail-search">Search</button>
+              </div>
+            </div>
+
+            <div id="gmail-email-list" style="margin-top:14px;"></div>
+            <div id="gmail-sel-count" class="gmail-sel-count hidden"></div>
+
+            <div class="gap-top">
+              <label class="field-label">Focus (optional)</label>
+              <textarea id="gmail-focus" rows="2" placeholder="What should we focus on from these emails? e.g. Summarise action items and key decisions"></textarea>
+            </div>
+            <p style="font-size:12px;color:#6B7280;margin-top:4px">Select emails above, then click <strong>'Analyze Content & Create Plan'</strong> to include them.</p>
+          </div>
+        </div><!-- /tab-gmail -->
+
+      </div><!-- /integrations-body -->
+    </details>
+
+    <!-- ── Proof screenshots ───────────────────────────────────────────── -->
+    <hr class="page-divider" style="margin:20px 0 14px;" />
+    <div><strong>📸 Proof of Work / Demo Screenshots</strong> <span style="font-size:12px;color:#6B7280">(Optional)</span></div>
+    <p style="font-size:12px;color:#6B7280;margin:4px 0 10px;">Each screenshot gets its own slide appended after the main deck.</p>
+    <div class="file-drop" data-target="proof-files">
+      <span>Click to upload screenshots</span>
+      <input type="file" id="proof-files" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.bmp" />
+    </div>
+    <div class="file-list" id="proof-files-list"></div>
+    <div class="gap-top">
+      <label class="field-label">Caption / label for these screenshots (optional)</label>
+      <input type="text" id="proof-caption" placeholder="e.g. Live demo on staging — May 2026" />
+    </div>
+    <div id="proof-info" class="alert alert-info hidden" style="margin-top:8px;"></div>
+
+  </section><!-- /step-1 -->
+
+  <!-- ── Step 2: Leader ────────────────────────────────────────────────────── -->
+  <section id="step-2">
+    <p class="step-header">Step 2: Select Audience</p>
+    <div class="row">
+      <div class="col-1">
+        <label class="field-label">Presenting to</label>
+        <select id="leader-select" style="margin-bottom:8px;"></select>
+      </div>
+      <div class="col-2">
+        <div id="profile-card" class="profile-card">
+          <em style="color:#9CA3AF">Select a leader to see their preferences</em>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Step 3: Analyze ───────────────────────────────────────────────────── -->
+  <section id="step-3">
+    <p class="step-header">Step 3: Generate Slide Plan</p>
+    <button class="btn btn-primary btn-full" id="btn-analyze" style="font-size:15px;padding:12px;">
+      🚀 Analyze Content &amp; Create Plan
+    </button>
+    <div id="analyze-progress" class="hidden" style="margin-top:16px;">
+      <div class="progress-wrap"><div class="progress-bar" id="analyze-bar"></div></div>
+      <div class="progress-text" id="analyze-text">Starting…</div>
+    </div>
+    <div id="analyze-alert"></div>
+  </section>
+
+  <!-- ── Step 4: Plan editor ───────────────────────────────────────────────── -->
+  <section id="step-4" hidden>
+    <p class="step-header">Step 4: Review &amp; Edit Plan</p>
+
+    <details class="slide-content-block">
+      <summary>📊 Extracted Content Summary</summary>
+      <div class="json-block" id="content-json"></div>
+    </details>
+
+    <p style="font-size:13px;font-weight:600;margin:16px 0 8px;">Edit slide titles, reorder, or remove slides:</p>
+    <div id="plan-editor"></div>
+    <div class="slides-info" id="slides-info"></div>
+
+    <!-- ── Step 5: Generate ───────────────────────────────────────────────── -->
+    <section id="step-5">
+      <p class="step-header">Step 5: Generate Presentation</p>
+      <button class="btn btn-primary btn-full" id="btn-generate" style="font-size:15px;padding:12px;">
+        ⚡ Generate PPT
+      </button>
+      <div id="generate-progress" class="hidden" style="margin-top:16px;">
+        <div class="progress-wrap"><div class="progress-bar" id="generate-bar"></div></div>
+        <div class="progress-text" id="generate-text">Starting…</div>
+      </div>
+      <div id="generate-alert"></div>
+
+      <div id="output-section" class="hidden" style="margin-top:16px;">
+        <div class="row">
+          <div class="col-1">
+            <a id="btn-download" href="#" class="btn btn-primary btn-full" download>
+              ⬇️ Download Presentation
+            </a>
+          </div>
+          <div class="col-1">
+            <button class="btn btn-secondary btn-full" id="btn-preview">👁️ Preview in Browser</button>
+          </div>
+        </div>
+
+        <hr class="page-divider" style="margin:20px 0 12px;" />
+        <p style="font-size:14px;font-weight:600;">Generate for Another Leader</p>
+        <p style="font-size:13px;color:#6B7280;">Change the leader in Step 2 and click <strong>Generate PPT</strong> again — same content, different style!</p>
+
+        <details class="slide-content-block" id="slide-content-details">
+          <summary>View Generated Slide Content</summary>
+          <div id="slide-content-list" style="padding:10px 0;"></div>
+        </details>
+      </div>
+
+      <!-- Preview section (inline thumbnail strip) -->
+      <div id="preview-section" class="hidden" style="margin-top:20px;">
+        <div class="row" style="align-items:center;margin-bottom:8px;">
+          <div class="col-4">
+            <span style="font-size:13px;">Previewing: <strong id="preview-filename"></strong></span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary btn-sm" id="btn-fullscreen">⛶ Full Screen</button>
+            <button class="btn btn-secondary btn-sm" id="btn-close-preview">✕ Close</button>
+          </div>
+        </div>
+        <div id="preview-progress" class="hidden">
+          <div class="progress-wrap"><div class="progress-bar" id="preview-bar"></div></div>
+          <div class="progress-text" id="preview-text">Rendering slides…</div>
+        </div>
+        <div class="preview-grid" id="preview-grid"></div>
+        <div class="preview-nav" id="preview-nav" style="display:none;">
+          <button class="btn btn-secondary btn-sm" id="btn-prev-page">← Prev</button>
+          <span class="preview-page-info" id="preview-page-info"></span>
+          <button class="btn btn-secondary btn-sm" id="btn-next-page">Next →</button>
+        </div>
+      </div>
+    </section>
+  </section><!-- /step-4 -->
+
+</div><!-- /main-content -->
+
+<!-- ── Fullscreen overlay ──────────────────────────────────────────────────── -->
+<div id="fs-overlay" class="hidden" role="dialog" aria-modal="true">
+  <div id="fs-toolbar">
+    <span id="fs-title">Slide Preview</span>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="fs-nav-btn" id="fs-btn-prev" title="Previous (←)">&#8592; Prev</button>
+      <span id="fs-counter"></span>
+      <button class="fs-nav-btn" id="fs-btn-next" title="Next (→)">Next &#8594;</button>
+      <button class="fs-close-btn" id="fs-btn-close" title="Close (Esc)">✕</button>
+    </div>
+  </div>
+  <div id="fs-stage">
+    <img id="fs-img" alt="Slide preview" />
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

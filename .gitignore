@@ -8,4 +8,5 @@ temp/
 .DS_Store
 credentials.json
 token.json
+gateway_config.json
 streamlit_err.log
