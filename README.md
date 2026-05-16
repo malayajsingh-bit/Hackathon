@@ -1,55 +1,129 @@
 # Indiamart AI Presentation Generator
 
-AI-powered PPT generator that creates presentations tailored to leadership preferences.
+Automatically generates branded PowerPoint presentations tailored to Indiamart leadership (CEO, CTO, VP Sales, VP Product). You feed it content — text, files, URLs, or Gmail threads — and it produces a ready-to-present `.pptx` file.
 
-## Setup
+---
+
+## What you need before starting
+
+- **Python 3.10 or higher** — check with `python --version`
+- **Git** — to clone the repo
+- **The LLM gateway credentials** — a `gateway_config.json` file (see below)
+
+---
+
+## Setup (one-time)
+
+**1. Clone the repo**
+```bash
+git clone <repo-url>
+cd Hackathon
+```
+
+**2. Create a virtual environment** (recommended, keeps dependencies isolated)
+```bash
+python -m venv venv
+
+# On Mac/Linux:
+source venv/bin/activate
+
+# On Windows:
+venv\Scripts\activate
+```
+
+**3. Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+**4. Create the gateway config file**
+
+Create a file named `gateway_config.json` in the project root with this content:
+```json
+{
+  "gateway_url": "https://imllm.intermesh.net/v1",
+  "api_key": "your-api-key-here",
+  "model_name": "google/gemini-3-flash-preview"
+}
+```
+Get the `api_key` from your team. Without this file the tool will not work.
+
+---
+
+## Running the app (Streamlit UI)
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set your Anthropic API key (or enter in the UI)
-export ANTHROPIC_API_KEY="your-key-here"
-
-# Run the app
 streamlit run app.py
 ```
 
-## Usage
+Then open your browser at **http://localhost:8501**
 
-1. Open the app in your browser (http://localhost:8501)
-2. Enter your Anthropic API key in the sidebar
-3. Provide content (upload files, paste text, or enter a topic)
-4. Select who you're presenting to (CEO, CTO, VP Sales, VP Product)
-5. Review and edit the slide plan
-6. Click Generate PPT and download
+---
 
-## Project Structure
+## Running via Claude Code (CLI)
+
+If you have Claude Code installed, just open this project folder and type:
+```
+I want to make a PPT
+```
+Claude will guide you through picking the leader, content source, and will generate the file automatically.
+
+---
+
+## How to use (Streamlit)
+
+1. Open the app at `http://localhost:8501`
+2. Choose who the presentation is for (CEO, CTO, VP Sales, VP Product)
+3. Provide your content — paste text, upload a file (PDF/Excel/DOCX), enter a URL, or describe a topic
+4. Review the slide plan and make changes if needed
+5. Click **Generate PPT** — the file downloads automatically
+
+---
+
+## Supported content sources
+
+| Source | What to provide |
+|---|---|
+| Text | Paste or type your content directly |
+| Files | PDF, Word, Excel, CSV, PowerPoint |
+| URL | Any public webpage |
+| Topic | Just describe it — the AI fills in the content |
+| Gmail | Email threads (requires Gmail MCP in Claude Code) |
+
+---
+
+## Project structure
 
 ```
 Hackathon/
-├── app.py                    # Streamlit UI
-├── requirements.txt
+├── app.py                    # Streamlit web UI
+├── mcp_ppt_runner.py         # CLI runner (used by Claude Code)
+├── requirements.txt          # Python dependencies
+├── gateway_config.json       # LLM gateway credentials (create this yourself)
 ├── core/
-│   ├── content_extractor.py  # Reads sources → structured content
-│   ├── slide_planner.py      # Content + Profile → slide structure
-│   ├── slide_generator.py    # Slide structure → text per slide
-│   ├── chart_generator.py    # Data → matplotlib charts
-│   ├── diagram_generator.py  # Specs → diagram images
-│   └── ppt_renderer.py       # Everything → .pptx file
+│   ├── content_extractor.py  # Reads sources and pulls out key content
+│   ├── slide_planner.py      # Turns content into a slide plan
+│   ├── slide_generator.py    # Writes text for each slide
+│   ├── chart_generator.py    # Creates charts from data
+│   ├── diagram_generator.py  # Creates diagrams
+│   ├── ppt_renderer.py       # Assembles everything into a .pptx
+│   └── gmail_mcp_bridge.py   # Normalises Gmail thread data
 ├── profiles/
-│   ├── ceo.yml               # CEO preferences
-│   ├── cto.yml               # CTO preferences
-│   ├── vp_sales.yml          # VP Sales preferences
-│   └── vp_product.yml        # VP Product preferences
+│   ├── ceo.yml               # CEO style & preferences
+│   ├── cto.yml               # CTO style & preferences
+│   ├── vp_sales.yml          # VP Sales style & preferences
+│   └── vp_product.yml        # VP Product style & preferences
+├── prompts.md                # All LLM system prompts
 ├── utils/
-│   ├── claude_client.py      # Claude API wrapper
 │   └── config.py             # Brand colors, fonts, constants
-├── output/                   # Generated PPTs saved here
-└── temp/                     # Temporary chart/diagram images
+├── output/                   # Generated .pptx files are saved here
+└── temp/                     # Temporary files used during generation
 ```
 
-## Adding New Leader Profiles
+---
 
-Create a new `.yml` file in `profiles/` following the existing format.
-The app auto-discovers all profiles on startup.
+## Adding a new leader profile
+
+1. Create a new `.yml` file in `profiles/` (e.g. `vp_engineering.yml`)
+2. Follow the same structure as an existing profile
+3. The app picks it up automatically — no code changes needed
